@@ -1,78 +1,66 @@
 package main
 
 import (
-	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 )
 
-type Progress struct {
-	Percentage float64 `json:"percentage"`
-	DeviceID   string  `json:"device_id"`
-	Timestamp  int64   `json:"timestamp"`
-}
-
 var (
-	storage = make(map[string]Progress)
+	// Polička na dáta (všetko ukladáme ako čistý text/JSON)
+	storage = make(map[string][]byte)
 	mutex   sync.RWMutex
 )
 
 func main() {
 	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8081"
-	}
+	if port == "" { port = "8081" }
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Request: %s %s", r.Method, r.URL.Path)
+		log.Printf("Metoda: %s | Cesta: %s", r.Method, r.URL.Path)
 
-		// 1. Odpoveď na Auth (vždy úspech)
-		if strings.Contains(r.URL.Path, "/auth") {
+		// 1. Ak KOReader len "klope" na Auth
+		if r.URL.Path == "/auth" || r.URL.Path == "/koreader/v1/auth" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"username":"emero31","token":"ok"}`))
 			return
 		}
 
-		// 2. Spracovanie priebehu
-		if strings.Contains(r.URL.Path, "/progress") {
-			key := r.URL.Path
+		// 2. Ak KOReader posiela alebo pyta data (Progress)
+		key := r.URL.Path
+
+		if r.Method == http.MethodPut {
+			body, _ := io.ReadAll(r.Body)
+			mutex.Lock()
+			storage[key] = body
+			mutex.Unlock()
 			
-			if r.Method == http.MethodPut {
-				var p Progress
-				json.NewDecoder(r.Body).Decode(&p)
-				
-				mutex.Lock()
-				storage[key] = p
-				mutex.Unlock()
-
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusCreated)
-				json.NewEncoder(w).Encode(p) // KOReader chce vidieť tie dáta späť
-				return
-			}
-
-			if r.Method == http.MethodGet {
-				mutex.RLock()
-				p, ok := storage[key]
-				mutex.RUnlock()
-				
-				if !ok {
-					w.WriteHeader(http.StatusNotFound)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(p)
-				return
-			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write(body) // Vratime mu presne to iste, co poslal
+			return
 		}
 
-		// 3. Všeobecná odpoveď OK pre čokoľvek iné
+		if r.Method == http.MethodGet {
+			mutex.RLock()
+			val, ok := storage[key]
+			mutex.RUnlock()
+
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(val)
+			return
+		}
+
+		// Poistka pre vsetko ostatne
 		w.WriteHeader(http.StatusOK)
 	})
 
-	log.Printf("Server bezi na porte %s...", port)
+	log.Printf("Dojicka nastartovana na porte %s...", port)
 	http.ListenAndServe(":"+port, nil)
 }
