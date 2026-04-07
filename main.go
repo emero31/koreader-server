@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -25,24 +26,28 @@ func main() {
 		port = "8081"
 	}
 
-	http.HandleFunc("/users/", handleSync)
+	// Toto je to správne potrubie pre KOReader!
+	http.HandleFunc("/koreader/v1/progress/", handleSync)
 	
-	log.Printf("Server startuje na porte %s...", port)
+	log.Printf("Server bezi na porte %s...", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func handleSync(w http.ResponseWriter, r *http.Request) {
+	// Získame názov knihy z URL
 	key := r.URL.Path
+	
 	if r.Method == http.MethodGet {
 		mutex.RLock()
 		p, ok := data[key]
 		mutex.RUnlock()
 		if !ok {
-			http.Error(w, "Not found", http.StatusNotFound)
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(p)
 	} else if r.Method == http.MethodPut {
 		var p Progress
@@ -54,5 +59,6 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 		data[key] = p
 		mutex.Unlock()
 		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"status":"ok"}`)
 	}
 }
