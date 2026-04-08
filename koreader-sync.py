@@ -15,16 +15,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
-    # TOTO VYRIEŠI TEN "IN PROGRESS" ZÁSEK
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
 
     def do_GET(self):
         print(f"DEBUG GET: {self.path}")
-        if "auth" in self.path:
-            return self._send_json({"username":"emero31","token":"ok-token"})
-        
         with sqlite3.connect(DB_PATH) as conn:
             res = conn.execute("SELECT val FROM sync WHERE key=?", (self.path,)).fetchone()
             if res:
@@ -33,23 +29,32 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(res[0].encode())
             else:
-                self.send_response(404)
-                self.end_headers()
+                self._send_json({"error": "not found"}, 404)
 
     def do_PUT(self):
-        print(f"DEBUG PUT: {self.path}")
         content_length = int(self.headers.get('Content-Length', 0))
         body_str = self.rfile.read(content_length).decode()
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body_str))
+        
         try:
-            resp = json.loads(body_str)
-        except:
-            resp = {"status":"ok"}
-        self._send_json(resp, 201)
+            data = json.loads(body_str)
+            doc_hash = data.get("document") # TU JE TEN 939ee5...
+            
+            with sqlite3.connect(DB_PATH) as conn:
+                # 1. Uložíme pod pôvodnou cestou
+                conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body_str))
+                # 2. Uložíme pod cestou, ktorú bude pýtať MO (ten hash)
+                if doc_hash:
+                    full_path = f"/v1/syncs/progress/{doc_hash}"
+                    conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (full_path, body_str))
+                    print(f"SAVED BOTH: {self.path} AND {full_path}")
+        except Exception as e:
+            print(f"ERROR: {e}")
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body_str))
+
+        self._send_json(json.loads(body_str) if body_str.startswith('{') else {"status":"ok"}, 201)
 
     def do_PATCH(self):
-        print(f"DEBUG PATCH: {self.path}")
         self.do_PUT()
 
     def do_OPTIONS(self):
