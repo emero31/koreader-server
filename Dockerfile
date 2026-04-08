@@ -1,9 +1,14 @@
-# Použijeme inú, overenú verziu, ktorá je verejne dostupná bez hesla
-FROM schmorp/koreader-sync:latest
+FROM python:3.9-slim
 
-# Tento server je v Pythone a je to ten "skutočný" originál
+# Nastavíme pracovný priečinok
+WORKDIR /app
+
+# Skopírujeme tvoj python kód do vnútra kontajnera
+COPY koreader-sync.py .
+
+# Nastavíme port pre Render
 ENV PORT=10000
 EXPOSE 10000
 
-# Spustíme ho
-CMD ["python", "koreader-sync.py", "0.0.0.0", "10000", "/data/koreader-sync-metadata.db"]
+# Spustíme tvoj kód
+CMD ["python", "koreader-sync.py"]
