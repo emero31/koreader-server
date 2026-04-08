@@ -1,4 +1,3 @@
 FROM ghcr.io/cmooon/kosync:latest
-ENV PORT=7200
-EXPOSE 7200
+# Skúsime nechať port na Renderi, on si ho pridelí sám
 CMD ["/app/kosync", "serve"]
