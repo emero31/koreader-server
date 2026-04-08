@@ -1,4 +1,5 @@
 import os, sqlite3, json
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 DB_PATH = "koreader.db"
 
@@ -15,11 +16,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
 
     def do_GET(self):
-        # Ak KOReader pýta login
+        print(f"DEBUG GET: {self.path}")
         if "auth" in self.path:
             return self._send_json({"username":"emero31","token":"ok-token"})
         
-        # Hľadáme dáta (či už progress alebo metadata s PAZ)
         with sqlite3.connect(DB_PATH) as conn:
             res = conn.execute("SELECT val FROM sync WHERE key=?", (self.path,)).fetchone()
             if res:
@@ -32,23 +32,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
 
     def do_PUT(self):
+        print(f"DEBUG PUT: {self.path}")
         content_length = int(self.headers.get('Content-Length', 0))
         body_str = self.rfile.read(content_length).decode()
         
-        # Ukladáme VŠETKO pod cestou, ktorú KOReader poslal
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body_str))
         
-        # Ak poslal progress, KOReader-Go vyžaduje vrátiť ten istý objekt
         try:
             resp = json.loads(body_str)
         except:
             resp = {"status":"ok"}
-            
         self._send_json(resp, 201)
 
-    # Dôležité: KOSync-Go používa PATCH pre aktualizáciu poznámok!
+    # Dôležité pre poznámky v KOSync-Go protokole
     def do_PATCH(self):
+        print(f"DEBUG PATCH: {self.path}")
         self.do_PUT()
 
     def do_OPTIONS(self):
@@ -58,8 +57,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 10000))
+    print(f"Server beží na porte {port}...")
     HTTPServer(("0.0.0.0", port), Handler).serve_forever()
