@@ -1,5 +1,4 @@
 import os, sqlite3, json
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 DB_PATH = "koreader.db"
 
@@ -16,7 +15,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
 
     def do_GET(self):
-        # Toto zachytí úplne každú žiadosť o dáta (priebeh aj poznámky)
+        # Ak KOReader pýta login
+        if "auth" in self.path:
+            return self._send_json({"username":"emero31","token":"ok-token"})
+        
+        # Hľadáme dáta (či už progress alebo metadata s PAZ)
         with sqlite3.connect(DB_PATH) as conn:
             res = conn.execute("SELECT val FROM sync WHERE key=?", (self.path,)).fetchone()
             if res:
@@ -32,29 +35,30 @@ class Handler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get('Content-Length', 0))
         body_str = self.rfile.read(content_length).decode()
         
-        # Uložíme hocičo, čo KOReader pošle (priebeh, poznámky, nastavenia)
+        # Ukladáme VŠETKO pod cestou, ktorú KOReader poslal
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body_str))
         
-        # Ak ide o progress, skúsime uložiť aj pod hash-om pre spätnú kompatibilitu
-        if "progress" in self.path:
-            try:
-                data = json.loads(body_str)
-                doc_hash = data.get("document")
-                if doc_hash:
-                    with sqlite3.connect(DB_PATH) as conn:
-                        conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (f"/v1/syncs/progress/{doc_hash}", body_str))
-            except: pass
+        # Ak poslal progress, KOReader-Go vyžaduje vrátiť ten istý objekt
+        try:
+            resp = json.loads(body_str)
+        except:
+            resp = {"status":"ok"}
+            
+        self._send_json(resp, 201)
 
-        self._send_json({"status":"ok"}, 201)
+    # Dôležité: KOSync-Go používa PATCH pre aktualizáciu poznámok!
+    def do_PATCH(self):
+        self.do_PUT()
 
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, PUT, PATCH, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 10000))
