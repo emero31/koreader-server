@@ -15,6 +15,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
+    # TOTO VYRIEŠI TEN "IN PROGRESS" ZÁSEK
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
     def do_GET(self):
         print(f"DEBUG GET: {self.path}")
         if "auth" in self.path:
@@ -35,17 +40,14 @@ class Handler(BaseHTTPRequestHandler):
         print(f"DEBUG PUT: {self.path}")
         content_length = int(self.headers.get('Content-Length', 0))
         body_str = self.rfile.read(content_length).decode()
-        
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body_str))
-        
         try:
             resp = json.loads(body_str)
         except:
             resp = {"status":"ok"}
         self._send_json(resp, 201)
 
-    # Dôležité pre poznámky v KOSync-Go protokole
     def do_PATCH(self):
         print(f"DEBUG PATCH: {self.path}")
         self.do_PUT()
@@ -53,12 +55,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, PUT, PATCH, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, PUT, PATCH, OPTIONS, HEAD")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 10000))
-    print(f"Server beží na porte {port}...")
     HTTPServer(("0.0.0.0", port), Handler).serve_forever()
