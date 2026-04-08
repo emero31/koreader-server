@@ -1,7 +1,7 @@
 import os, sqlite3, json, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-DB_PATH = "koreader.db"
+DB_PATH = "/tmp/koreader.db"
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
