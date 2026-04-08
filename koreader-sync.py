@@ -8,19 +8,16 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS sync (key TEXT PRIMARY KEY, val TEXT)")
 
 class Handler(BaseHTTPRequestHandler):
-    def _send_json(self, data, status=200):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("x-auth-token", "ok-token") # KOReader toto vyžaduje
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+    def log_message(self, format, *args):
+        print(f"Request: {self.command} {self.path}")
 
     def do_GET(self):
-        # Ak sa pýta na prihlásenie (auth)
         if "auth" in self.path:
-            self._send_json({"username":"emero31","token":"ok-token"})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"username":"emero31","token":"ok"}).encode())
         else:
-            # Hľadáme dáta pre akúkoľvek cestu, ktorú KOReader pošle
             with sqlite3.connect(DB_PATH) as conn:
                 res = conn.execute("SELECT val FROM sync WHERE key=?", (self.path,)).fetchone()
                 if res:
@@ -33,17 +30,23 @@ class Handler(BaseHTTPRequestHandler):
                     self.end_headers()
 
     def do_PUT(self):
-        content_length = int(self.headers['Content-Length'])
+        content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length).decode()
-        # Uložíme to pod kľúčom, ktorý poslal KOReader (napr. /users/emero31/koreaderfs/...)
+        
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body))
-        self._send_json({"status":"created"}, 201)
+        
+        # ZMENA: KOReader chce vidieť tie dáta, ktoré práve poslal, aj v odpovedi
+        self.send_response(201)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body.encode()) # Vrátime mu to, čo poslal
 
     def do_OPTIONS(self):
         self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "x-auth-token, Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
 if __name__ == "__main__":
