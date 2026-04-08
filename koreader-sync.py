@@ -1,4 +1,4 @@
-import os, sqlite3, json
+import os, sqlite3, json, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 DB_PATH = "koreader.db"
@@ -9,14 +9,12 @@ def init_db():
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        print(f"Request: {self.command} {self.path}")
+        # Toto nám vypíše cestu do logov na Renderi
+        print(f"DEBUG: {self.command} {self.path}")
 
     def do_GET(self):
         if "auth" in self.path:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"username":"emero31","token":"ok"}).encode())
+            self._send_json({"username":"emero31","token":"ok-token"})
         else:
             with sqlite3.connect(DB_PATH) as conn:
                 res = conn.execute("SELECT val FROM sync WHERE key=?", (self.path,)).fetchone()
@@ -31,16 +29,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length).decode()
+        body_str = self.rfile.read(content_length).decode()
         
+        # Uložíme dáta
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body))
+            conn.execute("INSERT OR REPLACE INTO sync VALUES (?, ?)", (self.path, body_str))
         
-        # ZMENA: KOReader chce vidieť tie dáta, ktoré práve poslal, aj v odpovedi
+        # PRÍPRAVA ODPOVEDE, KTORÚ PLUGIN MILUJE
+        try:
+            data = json.loads(body_str)
+            # Pridáme timestamp, ak tam nie je
+            if "timestamp" not in data:
+                data["timestamp"] = int(time.time())
+        except:
+            data = {"status": "created"}
+
         self.send_response(201)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(body.encode()) # Vrátime mu to, čo poslal
+        self.wfile.write(json.dumps(data).encode())
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -48,6 +55,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
+
+    def _send_json(self, data, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
 
 if __name__ == "__main__":
     init_db()
