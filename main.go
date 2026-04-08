@@ -1,15 +1,27 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 )
 
+type Progress struct {
+	DocumentHash string  `json:"document_hash"`
+	Percentage   float64 `json:"percentage"`
+	Progress     string  `json:"progress"`
+	DeviceID     string  `json:"device_id"`
+	DeviceName   string  `json:"device_name"`
+	Timestamp    int64   `json:"timestamp"`
+}
+
 var (
-	storage = make(map[string][]byte)
+	storage = make(map[string]Progress)
 	mutex   sync.RWMutex
 )
 
@@ -17,54 +29,77 @@ func main() {
 	port := os.Getenv("PORT")
 	if port == "" { port = "8081" }
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Pridáme hlavičky, ktoré hovoria "VŠETKO JE DOVOLENÉ"
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	http.HandleFunc("/", handleRequest)
 
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+	log.Printf("Server startuje na porte %s...", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatal(err)
+	}
+}
 
-		log.Printf("%s %s", r.Method, r.URL.Path)
+func handleRequest(w http.ResponseWriter, r *http.Request) {
+	// Povolenie vsetkeho (CORS)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-auth-token")
 
-		// Reakcia na Auth
-		if r.URL.Path == "/auth" || r.URL.Path == "/koreader/v1/auth" || r.URL.Path == "/v1/auth" {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"username":"emero31","token":"ok"}`))
-			return
-		}
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
-		// Reakcia na Progress (Ukladanie)
+	path := r.URL.Path
+	log.Printf("Spracovavam: %s %s", r.Method, path)
+
+	// 1. AUTH - KOReader sa pyta na autorizaciu
+	if strings.HasSuffix(path, "/auth") {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"username":"%s","token":"fixed_token"}`, "emero31")
+		return
+	}
+
+	// 2. PROGRESS - Synchronizacia pozicie
+	if strings.Contains(path, "/progress") {
+		// Vypreparujeme hash dokumentu z URL
+		parts := strings.Split(path, "/")
+		docHash := parts[len(parts)-1]
+
 		if r.Method == http.MethodPut {
+			var p Progress
 			body, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(body, &p); err != nil {
+				log.Printf("Chyba JSONu: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			p.DocumentHash = docHash
+			
 			mutex.Lock()
-			storage[r.URL.Path] = body
+			storage[docHash] = p
 			mutex.Unlock()
+
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
-			w.Write(body)
+			json.NewEncoder(w).Encode(p)
 			return
 		}
 
-		// Reakcia na Progress (Načítanie)
 		if r.Method == http.MethodGet {
 			mutex.RLock()
-			val, ok := storage[r.URL.Path]
+			p, ok := storage[docHash]
 			mutex.RUnlock()
+
 			if !ok {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(val)
+			w.Header().Set("ETag", fmt.Sprintf("\"%s\"", docHash))
+			json.NewEncoder(w).Encode(p)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-	})
+	}
 
-	log.Printf("Server bezi...")
-	http.ListenAndServe(":"+port, nil)
+	// 3. POISTKA - Zakladna odpoved pre plugin
+	w.WriteHeader(http.StatusOK)
 }
